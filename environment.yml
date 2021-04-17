@@ -1,0 +1,14 @@
+name: well-dash
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python>=3.7
+  - pandas
+  - requests
+  - pip
+  - numpy
+  - pip:
+    - dash==1.20.0
+    - welly
+    - striplog

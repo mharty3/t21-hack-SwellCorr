@@ -5,6 +5,7 @@ from dash import Dash, callback_context
 import dash_core_components as dcc
 import dash_html_components as html
 from dash.dependencies import Input, Output, State
+from dash.exceptions import PreventUpdate
 
 import json
 import numpy as np
@@ -26,21 +27,20 @@ w = Well.from_las(str(Path("well_picks/data/las/PoseidonNorth1Decim.LAS"))) #ori
 
 df = w.df()
 curve_list = df.columns.tolist()
-curve = curve_list[0]
+print("Loaded Curves:", curve_list)
+# curve = curve_list[0]
 
 # sample pick data, eventually load from file or other source into dict
 surface_picks = {"Sea Bed": 520.4, "Montara Formation": 4620, "Plover Formation (Top Volcanics)": 4703.2, "Plover Formation (Top Reservoir)": 4798.4, "Nome Formation": 5079}
 
 
-
-
-dropdown_options = [{'label': k, 'value': k} for k in list(surface_picks.keys())]
+top_dropdown_options = [{'label': k, 'value': k} for k in list(surface_picks.keys())]
 ##Need to make the selector grab the wanted curve
 curve_dropdown_options = [{'label': k, 'value': k} for k in curve_list]
 
 # draw the initial plot
-fig_well_1 = px.line(x=df[curve], y=df.index, labels = {'x':curve, 'y': df.index.name})
-fig_well_1.update_yaxes(autorange="reversed")
+fig_well_1 = px.line(x=df[curve_list[0]], y=df.index, labels = {'x':curve_list[0], 'y': df.index.name})
+fig_well_1.update_yaxes(autorange=True)
 helper.update_picks_on_plot(fig_well_1, surface_picks)
 
 
@@ -53,18 +53,29 @@ app.layout = html.Div(
                                     {'label': 'Tops', 'value': 'tops_mode'}],
                                     value='display_mode'),
 
-            'Edit tops:', 
-            dcc.Dropdown(id='top-selector', options=dropdown_options, placeholder="Select a top to edit", style={'width': '200px'}),
-            
+            'Edit tops:',
+            dcc.Dropdown(
+                id='top-selector',
+                options=top_dropdown_options,
+                placeholder="Select a top to edit",
+                style={'width': '200px'}),
+
             html.Hr(),
+
             'Create a new surface pick:', html.Br(),
             dcc.Input(id='new-top-name', placeholder='Name for new top', type='text', value=''),
             html.Button('Create', id='new-top-button'),
-            
+
             html.Hr(),
             'Curve Select:', html.Br(),
-            dcc.Dropdown(id='curve-selector', options=curve_dropdown_options, value=curve, placeholder="Select a curve", style={'width': '200px'}),
-            
+            dcc.Dropdown(
+                id='curve-selector',
+                options=curve_dropdown_options,
+                value=curve_list[0],
+                placeholder="Select a curve",
+                clearable=False,
+                style={'width': '200px'}),
+
             html.Hr(),
             "Write tops to file:",
             dcc.Input(id='input-save-path', type='text', placeholder='path_to_save_picks.json', value=''),
@@ -74,7 +85,7 @@ app.layout = html.Div(
             html.Button('Update Striplog', id='gen-striplog-button')
 
         ]),
-        dcc.Graph(id="well_plot", 
+        dcc.Graph(id="well_plot",
                     figure=fig_well_1,
                     style={'width': '60%', 'height':'900px'},
                     animate=False), # prevents axis rescaling on graph update
@@ -88,22 +99,12 @@ app.layout = html.Div(
             html.H4('Striplog CSV Text:'),
             html.Pre(id='striplog-txt', children='', style={'white-space': 'pre-wrap'}),
         ]),
-        
+
         # hidden_div for storing un-needed output
         html.Div(id='placeholder', style={'display': 'none'})
     ],
     style={'display': 'flex'}
 )
-
-@app.callback(
-    Output('well_plot', 'animate'),
-    [Input('mode-selector', 'value')])
-def set_animate(mode):
-    if mode == 'display_mode':
-        return False
-    elif mode == 'tops_mode':
-        return True
-
 
 
 # update tops data when graph is clicked or new top is added
@@ -116,14 +117,14 @@ def set_animate(mode):
      State('new-top-name', 'value')])
 def update_pick_storage(clickData, new_top_n_clicks, active_pick, surface_picks, new_top_name):
     """Update the json stored in tops-storage div based on y-value of click"""
-    
+
     # Each element in the app can only be updated by one call back function.
     # So anytime we want to change the tops-storage it has to be inside of this function.
     # We need to use the dash.callback_context to determine which event triggered
     # the callback and determine which actions to take
-    # https://dash.plotly.com/advanced-callbacks    
+    # https://dash.plotly.com/advanced-callbacks
     surface_picks = json.loads(surface_picks)
-    
+
     # get callback context
     ctx = callback_context
     if not ctx.triggered:
@@ -145,21 +146,40 @@ def update_pick_storage(clickData, new_top_n_clicks, active_pick, surface_picks,
 
     return json.dumps(surface_picks)
 
+
+#
+#   UPDATE WELL PLOT
+#
+@app.callback(
+    Output('well_plot', 'animate'),
+    [Input('mode-selector', 'value')])
+def set_animate(mode):
+    if mode == 'display_mode':
+        return False
+    elif mode == 'tops_mode':
+        return True
+
+
 # Update graph when tops storage changes
 @app.callback(
     Output("well_plot", "figure"),
     [Input('tops-storage', 'children'),
-     Input('curve-selector', 'value')]
+     Input('curve-selector', 'value')],
+     [State('well_plot', 'figure')],
+     prevent_initial_call=True
     )
-def update_figure(surface_picks, curve):
-    """redraw the plot when the data in tops-storage is updated"""  
+def update_figure(surface_picks, curve, old_figure):
+    """redraw the plot when the data in response to UI or data changes"""
+    # if our inupts are invalid stop
+    if curve is None or surface_picks is None:
+        raise PreventUpdate
+
     surface_picks = json.loads(surface_picks)
-    
-   
     # regenerate figure with the new horizontal line
     """this is not updating the figure for the newly selected curve"""
+    print(old_figure)
     fig = px.line(x=df[curve], y=df.index, labels = {'x':curve, 'y': df.index.name})
-    fig.update_yaxes(autorange="reversed")
+    # fig.update_yaxes(autorange=False)
     helper.update_picks_on_plot(fig, surface_picks)
 
     return fig ###this does not seem to return to dcc.Graph in the app
@@ -171,7 +191,7 @@ def update_figure(surface_picks, curve):
     [Input('tops-storage', 'children')])
 def update_dropdown_options(surface_picks):
     """update the options available in the dropdown when a new top is added"""
-    
+
     surface_picks = json.loads(surface_picks)
 
     dropdown_options = [{'label': k, 'value': k} for k in list(surface_picks.keys())]
@@ -184,7 +204,7 @@ def update_dropdown_options(surface_picks):
     [State('tops-storage', 'children'),
     State('input-save-path', 'value')])
 def save_picks(n_clicks, surface_picks, path):
-    """Save out picks to a csv file. 
+    """Save out picks to a csv file.
     TODO: I am sure there are better ways to handle saving out picks, but this is proof of concept"""
     #picks_df = pd.read_json(surface_picks)
 
@@ -203,7 +223,7 @@ def save_picks(n_clicks, surface_picks, path):
 def generate_striplog(n_clicks, surface_picks):
     surface_picks = json.loads(surface_picks)
     surface_picks = {key:val for key, val in surface_picks.items() if (key and val)}
-    
+
     s = helper.surface_pick_dict_to_striplog(surface_picks)
     return json.dumps(s.to_csv())
 
