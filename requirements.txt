@@ -1,0 +1,9 @@
+matplotlib
+numpy
+pandas
+dash
+welly
+striplog
+dash_bootstrap_components
+gunicorn
+requests
